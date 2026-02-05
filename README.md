@@ -17,15 +17,49 @@ A schema-driven, multi-stage form builder that renders fields dynamically, valid
 
 - index.html — page markup and layout
 - formBuilder.js — rendering, state, and UI logic
-- schema.js — form schema definition
+- schema.capabilities.js — example schema module
+- schema.js — alternate schema definition
 - validation.js — validation helpers and rules
 
 ## Getting Started
 
 Open `index.html` in a browser.
 
+To use a different schema per page, set `data-schema-src` on the form element to the schema module path:
+
+```html
+<form
+  id="form"
+  class="needs-validation"
+  novalidate
+  data-schema-src="./schema.capabilities.js"
+></form>
+```
+
+Schema module template:
+
+```javascript
+export const formSchema = {
+  id: "example-form",
+  stages: [
+    {
+      label: "Stage 1",
+      fields: [
+        {
+          name: "fullName",
+          label: "Full name",
+          type: "text",
+          required: true,
+        },
+      ],
+    },
+  ],
+};
+```
+
 ## Notes
 
-- Form values are stored in localStorage under `formDraft`.
-- `formSchema` is the source of truth for fields and rules.
-- To make the summary stage optional, set `optional: true` on the summary stage in `schema.js`.
+- Form values are stored in localStorage under `formDraft` or `formDraft:{schemaId}` when `id` is provided in the schema.
+- Each schema module must export `formSchema`.
+- To make the summary stage optional, set `optional: true` on the summary stage in the schema module.
+- If the form does not render, ensure the form element includes `data-schema-src` and that the module path is correct.
