@@ -448,6 +448,9 @@ function renderForm(schema, container, state, stageIndex = null) {
 
         input.name = field.name;
         input.id = field.name;
+        if (field.required) {
+            input.required = true;
+        }
         input.value = state[field.name] ?? "";
         input.setAttribute("aria-invalid", "false");
         applyInputAttributes(input, field);
@@ -690,6 +693,7 @@ function updateStageIndicator(schema, stageIndex = 0) {
         step.dataset.stageIndex = String(index);
         step.setAttribute("role", "listitem");
         step.title = stageItem.label;
+        step.setAttribute("aria-label", stageItem.label ?? `שלב ${index + 1}`);
         step.textContent = String(index + 1);
 
         if (index === stageIndex) {
