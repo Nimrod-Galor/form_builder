@@ -643,6 +643,78 @@ function announceToScreenReader(message) {
     }, 100);
 }
 
+function isElementVisible(element) {
+    if (!(element instanceof HTMLElement)) {
+        return false;
+    }
+
+    if (element.hidden || element.getAttribute("aria-hidden") === "true") {
+        return false;
+    }
+
+    return element.offsetParent !== null || element.getClientRects().length > 0;
+}
+
+function getStageFocusableElements() {
+    const focusableSelector = [
+        "input:not([type=\"hidden\"]):not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        "button:not([disabled])",
+        "[tabindex]:not([tabindex=\"-1\"])"
+    ].join(", ");
+
+    const elements = [];
+
+    if (container) {
+        elements.push(...container.querySelectorAll(focusableSelector));
+    }
+
+    if (controls) {
+        elements.push(...controls.querySelectorAll(focusableSelector));
+    }
+
+    return elements.filter(isElementVisible);
+}
+
+function handleStageTabCycle(event) {
+    if (event.key !== "Tab") {
+        return;
+    }
+
+    const focusables = getStageFocusableElements();
+    if (!focusables.length) {
+        return;
+    }
+
+    const activeElement = document.activeElement;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const isActiveInScope = activeElement instanceof HTMLElement && focusables.includes(activeElement);
+
+    if (event.shiftKey) {
+        if (!isActiveInScope || activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        }
+        return;
+    }
+
+    if (!isActiveInScope || activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+function focusFirstStageElement() {
+    const focusables = getStageFocusableElements();
+    if (!focusables.length) {
+        return;
+    }
+
+    focusables[0].focus();
+}
+
 
 async function handleSubmit() {
     if (isSubmitting) {
@@ -728,6 +800,7 @@ function renderStage(stageIndex) {
         showErrors({});
         updateStageIndicator(formSchema, 0);
         updateNavigationControls(formSchema, 0);
+        focusFirstStageElement();
         return;
     }
 
@@ -749,6 +822,8 @@ function renderStage(stageIndex) {
         updateStageIndicator(formSchema, currentStage);
         updateNavigationControls(formSchema, currentStage);
     }
+
+    focusFirstStageElement();
 
     // Announce stage change to screen readers
     if (previousStage !== currentStage) {
@@ -921,6 +996,8 @@ if (resetButton) {
         }
     };
 }
+
+document.addEventListener("keydown", handleStageTabCycle);
 
 pruneHiddenFields(formSchema, state);
 saveDraft(state);
