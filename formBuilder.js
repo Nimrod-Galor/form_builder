@@ -23,7 +23,7 @@ const prevButton = document.getElementById("prev");
 const nextButton = document.getElementById("next");
 const submitButton = document.getElementById("submit");
 const resetButton = document.getElementById("reset");
-const state = loadDraft();
+const state = loadDraft(formSchema);
 
 // Create live region for screen reader announcements
 const liveRegion = document.createElement("div");
@@ -543,16 +543,21 @@ function showErrors(errors) {
     });
 }
 
-function saveDraft(state) {
-    localStorage.setItem("formDraft", JSON.stringify(state));
+function getDraftStorageKey(schema) {
+    const schemaId = String(schema?.id ?? "").trim();
+    return schemaId ? `formDraft:${schemaId}` : "formDraft";
 }
 
-function loadDraft() {
-    return JSON.parse(localStorage.getItem("formDraft") || "{}");
+function saveDraft(state, schema = formSchema) {
+    localStorage.setItem(getDraftStorageKey(schema), JSON.stringify(state));
 }
 
-function clearDraft() {
-    localStorage.removeItem("formDraft");
+function loadDraft(schema = formSchema) {
+    return JSON.parse(localStorage.getItem(getDraftStorageKey(schema)) || "{}");
+}
+
+function clearDraft(schema = formSchema) {
+    localStorage.removeItem(getDraftStorageKey(schema));
 }
 
 function resetForm(stateRef) {

@@ -192,6 +192,7 @@ const stages = [
 const fields = stages.flatMap(stage => stage.fields);
 
 export const formSchema = {
+  id: "capabilities-form",
   stages,
   fields
 };
