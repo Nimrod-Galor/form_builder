@@ -316,7 +316,13 @@ function renderForm(schema, container, state, stageIndex = null) {
             if (bodyText) {
                 const paragraph = document.createElement("p");
                 paragraph.className = "mb-0 text-muted";
-                paragraph.textContent = String(bodyText);
+                const lines = String(bodyText).split("\n");
+                lines.forEach((line, index) => {
+                    if (index > 0) {
+                        paragraph.appendChild(document.createElement("br"));
+                    }
+                    paragraph.appendChild(document.createTextNode(line));
+                });
                 infoBlock.appendChild(paragraph);
             }
 
