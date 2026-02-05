@@ -1,5 +1,3 @@
-// import { formSchema } from "./schema.js";
-import { formSchema } from "./schema.capabilities.js";
 import {
     REQUIRED_MESSAGE,
     getFields,
@@ -26,7 +24,8 @@ const nextButton = document.getElementById("next");
 const submitButton = document.getElementById("submit");
 const resetButton = document.getElementById("reset");
 const controls = document.getElementById("controls");
-const state = loadDraft(formSchema);
+let activeSchema = null;
+let state = {};
 let isSubmitting = false;
 let submitFeedback = null;
 
@@ -37,6 +36,36 @@ liveRegion.setAttribute("aria-live", "polite");
 liveRegion.setAttribute("aria-atomic", "true");
 liveRegion.className = "visually-hidden";
 document.body.appendChild(liveRegion);
+
+function getSchemaSource() {
+    if (!container) {
+        return null;
+    }
+
+    const schemaSrc = container.getAttribute("data-schema-src");
+    if (!schemaSrc) {
+        console.error("Form schema source is missing. Add data-schema-src to the form element.");
+        return null;
+    }
+
+    return schemaSrc;
+}
+
+async function loadSchemaFromDom() {
+    const schemaSrc = getSchemaSource();
+    if (!schemaSrc) {
+        return null;
+    }
+
+    const moduleUrl = new URL(schemaSrc, import.meta.url).href;
+    const schemaModule = await import(moduleUrl);
+    if (!schemaModule?.formSchema) {
+        console.error("Schema module did not export formSchema:", schemaSrc);
+        return null;
+    }
+
+    return schemaModule.formSchema;
+}
 
 function ensureSubmitFeedback() {
     if (submitFeedback) {
@@ -336,7 +365,7 @@ function scheduleRender(stageIndex, fieldName, focusTarget = null) {
     const nextStageIndex = typeof stageIndex === "number" ? stageIndex : currentStage;
     const timerId = setTimeout(() => {
         pendingRenderTimers.delete(fieldName);
-        if (isMultiStage(formSchema)) {
+        if (activeSchema && isMultiStage(activeSchema)) {
             renderStage(nextStageIndex, { restoreFocusTarget: focusTarget });
             return;
         }
@@ -616,15 +645,15 @@ function getDraftStorageKey(schema) {
     return schemaId ? `formDraft:${schemaId}` : "formDraft";
 }
 
-function saveDraft(state, schema = formSchema) {
+function saveDraft(state, schema = activeSchema) {
     localStorage.setItem(getDraftStorageKey(schema), JSON.stringify(state));
 }
 
-function loadDraft(schema = formSchema) {
+function loadDraft(schema = activeSchema) {
     return JSON.parse(localStorage.getItem(getDraftStorageKey(schema)) || "{}");
 }
 
-function clearDraft(schema = formSchema) {
+function clearDraft(schema = activeSchema) {
     localStorage.removeItem(getDraftStorageKey(schema));
 }
 
@@ -834,24 +863,28 @@ function isActiveElementInStageScope() {
 
 
 async function handleSubmit() {
+    if (!activeSchema) {
+        return;
+    }
+
     if (isSubmitting) {
         return;
     }
 
     clearSubmitFeedback();
 
-    if (isMultiStage(formSchema)) {
-        const stageErrors = validateStage(formSchema, state, currentStage);
+    if (isMultiStage(activeSchema)) {
+        const stageErrors = validateStage(activeSchema, state, currentStage);
         if (Object.keys(stageErrors).length) {
             showErrors(stageErrors);
             return;
         }
     }
 
-    pruneHiddenFields(formSchema, state);
-    const errors = validateStage(formSchema, state);
+    pruneHiddenFields(activeSchema, state);
+    const errors = validateStage(activeSchema, state);
     if (Object.keys(errors).length) {
-        const firstErrorStage = findFirstErrorStage(formSchema, errors);
+        const firstErrorStage = findFirstErrorStage(activeSchema, errors);
         if (firstErrorStage !== null && firstErrorStage !== currentStage) {
             renderStage(firstErrorStage, { focusOnChange: true });
         }
@@ -859,7 +892,7 @@ async function handleSubmit() {
         return;
     }
 
-    const payload = buildSubmissionPayload(formSchema, state);
+    const payload = buildSubmissionPayload(activeSchema, state);
     console.log("submit payload:", payload);
     console.log("submit payload JSON:", JSON.stringify(payload));
 
@@ -902,7 +935,7 @@ async function postPayload(payload) {
 }
 
 function renderStage(stageIndex, options = {}) {
-    if (!container) {
+    if (!container || !activeSchema) {
         return;
     }
 
@@ -913,14 +946,14 @@ function renderStage(stageIndex, options = {}) {
     // Require explicit stage index - fall back to 0 if not provided
     const targetIndex = typeof stageIndex === "number" ? stageIndex : 0;
 
-    pruneHiddenFields(formSchema, state);
+    pruneHiddenFields(activeSchema, state);
 
-    if (!isMultiStage(formSchema)) {
+    if (!isMultiStage(activeSchema)) {
         currentStage = 0;
-        renderForm(formSchema, container, state);
+        renderForm(activeSchema, container, state);
         showErrors({});
-        updateStageIndicator(formSchema, 0);
-        updateNavigationControls(formSchema, 0);
+        updateStageIndicator(activeSchema, 0);
+        updateNavigationControls(activeSchema, 0);
         if (restoreFocusTarget && restoreFocusTarget.version === focusVersion) {
             restoreFocus(restoreFocusTarget);
         } else if (!isActiveElementInStageScope() && lastStageFocusTarget) {
@@ -929,23 +962,23 @@ function renderStage(stageIndex, options = {}) {
         return;
     }
 
-    const lastIndex = getStageCount(formSchema) - 1;
+    const lastIndex = getStageCount(activeSchema) - 1;
     const previousStage = currentStage;
     currentStage = Math.min(Math.max(targetIndex, 0), lastIndex);
     furthestStageReached = Math.max(furthestStageReached, currentStage);
-    if (isOptionalSummaryStage(formSchema) && currentStage === getLastDataStageIndex(formSchema)) {
+    if (isOptionalSummaryStage(activeSchema) && currentStage === getLastDataStageIndex(activeSchema)) {
         furthestStageReached = Math.max(furthestStageReached, Math.min(currentStage + 1, lastIndex));
     }
-    if (isSummaryStage(formSchema, currentStage)) {
-        renderSummaryStage(formSchema, container, state);
+    if (isSummaryStage(activeSchema, currentStage)) {
+        renderSummaryStage(activeSchema, container, state);
         showErrors({});
-        updateStageIndicator(formSchema, currentStage);
-        updateNavigationControls(formSchema, currentStage);
+        updateStageIndicator(activeSchema, currentStage);
+        updateNavigationControls(activeSchema, currentStage);
     } else {
-        renderForm(formSchema, container, state, currentStage);
+        renderForm(activeSchema, container, state, currentStage);
         showErrors({});
-        updateStageIndicator(formSchema, currentStage);
-        updateNavigationControls(formSchema, currentStage);
+        updateStageIndicator(activeSchema, currentStage);
+        updateNavigationControls(activeSchema, currentStage);
     }
 
     if (previousStage === currentStage) {
@@ -962,8 +995,8 @@ function renderStage(stageIndex, options = {}) {
         if (focusOnChange) {
             focusFirstStageElement();
         }
-        const stage = formSchema.stages[currentStage];
-        announceToScreenReader(`שלב ${currentStage + 1} מתוך ${getStageCount(formSchema)} - ${stage.label}`);
+        const stage = activeSchema.stages[currentStage];
+        announceToScreenReader(`שלב ${currentStage + 1} מתוך ${getStageCount(activeSchema)} - ${stage.label}`);
     }
 }
 
@@ -1099,7 +1132,7 @@ if (container) {
 
 if (prevButton) {
     prevButton.onclick = () => {
-        if (!isMultiStage(formSchema)) {
+        if (!activeSchema || !isMultiStage(activeSchema)) {
             return;
         }
         renderStage(Math.max(currentStage - 1, 0), { focusOnChange: true });
@@ -1108,10 +1141,10 @@ if (prevButton) {
 
 if (nextButton) {
     nextButton.onclick = () => {
-        if (!isMultiStage(formSchema)) {
+        if (!activeSchema || !isMultiStage(activeSchema)) {
             return;
         }
-        const errors = validateStage(formSchema, state, currentStage);
+        const errors = validateStage(activeSchema, state, currentStage);
         if (Object.keys(errors).length) {
             showErrors(errors);
             return;
@@ -1143,7 +1176,16 @@ document.addEventListener("focusin", event => {
     }
 });
 
-pruneHiddenFields(formSchema, state);
-saveDraft(state);
+async function initFormBuilder() {
+    activeSchema = await loadSchemaFromDom();
+    if (!activeSchema) {
+        return;
+    }
 
-renderStage(0);
+    state = loadDraft(activeSchema);
+    pruneHiddenFields(activeSchema, state);
+    saveDraft(state, activeSchema);
+    renderStage(0);
+}
+
+initFormBuilder();
