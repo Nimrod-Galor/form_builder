@@ -14,6 +14,8 @@ let currentStage = 0;
 let formAbortController = null;
 let stageIndicatorAbortController = null;
 let furthestStageReached = 0;
+let focusVersion = 0;
+let lastStageFocusTarget = null;
 const renderDebounceMs = 200;
 const pendingRenderTimers = new Map();
 
@@ -301,22 +303,24 @@ function renderSummaryStage(schema, container, state) {
 
 function handleFieldChange(schema, state, stageIndex, fieldName, value) {
     clearPendingRender(fieldName);
+    const focusTarget = getActiveFocusTarget();
     state[fieldName] = value;
     pruneHiddenFields(schema, state);
     saveDraft(state);
     if (isMultiStage(schema)) {
         const nextStageIndex = typeof stageIndex === "number" ? stageIndex : currentStage;
-        renderStage(nextStageIndex);
+        renderStage(nextStageIndex, { restoreFocusTarget: focusTarget });
         return;
     }
-    renderStage();
+    renderStage(undefined, { restoreFocusTarget: focusTarget });
 }
 
 function handleFieldInput(schema, state, stageIndex, fieldName, value) {
+    const focusTarget = getActiveFocusTarget();
     state[fieldName] = value;
     pruneHiddenFields(schema, state);
     saveDraft(state);
-    scheduleRender(stageIndex, fieldName);
+    scheduleRender(stageIndex, fieldName, focusTarget);
 }
 
 function clearPendingRender(fieldName) {
@@ -327,16 +331,16 @@ function clearPendingRender(fieldName) {
     }
 }
 
-function scheduleRender(stageIndex, fieldName) {
+function scheduleRender(stageIndex, fieldName, focusTarget = null) {
     clearPendingRender(fieldName);
     const nextStageIndex = typeof stageIndex === "number" ? stageIndex : currentStage;
     const timerId = setTimeout(() => {
         pendingRenderTimers.delete(fieldName);
         if (isMultiStage(formSchema)) {
-            renderStage(nextStageIndex);
+            renderStage(nextStageIndex, { restoreFocusTarget: focusTarget });
             return;
         }
-        renderStage();
+        renderStage(undefined, { restoreFocusTarget: focusTarget });
     }, renderDebounceMs);
     pendingRenderTimers.set(fieldName, timerId);
 }
@@ -363,6 +367,7 @@ function renderForm(schema, container, state, stageIndex = null) {
         if (isPlainTextField(field)) {
             const infoBlock = document.createElement("div");
             infoBlock.className = "mb-3";
+            infoBlock.dataset.plainText = "true";
 
             const titleText = field.title ?? field.label;
             if (titleText) {
@@ -630,7 +635,7 @@ function resetForm(stateRef) {
     clearSubmitFeedback();
     currentStage = 0;
     furthestStageReached = 0;
-    renderStage(0);
+    renderStage(0, { focusOnChange: true });
     announceToScreenReader("הטופס אופס");
 }
 
@@ -656,6 +661,14 @@ function isElementVisible(element) {
     return element.offsetParent !== null || element.getClientRects().length > 0;
 }
 
+function isElementInStageScope(element) {
+    if (!(element instanceof HTMLElement)) {
+        return false;
+    }
+
+    return Boolean((container && container.contains(element)) || (controls && controls.contains(element)));
+}
+
 function getStageFocusableElements() {
     const focusableSelector = [
         "input:not([type=\"hidden\"]):not([disabled])",
@@ -675,7 +688,56 @@ function getStageFocusableElements() {
         elements.push(...controls.querySelectorAll(focusableSelector));
     }
 
-    return elements.filter(isElementVisible);
+    return elements.filter(element => {
+        if (!isElementVisible(element)) {
+            return false;
+        }
+
+        return !element.closest("[data-plain-text]");
+    });
+}
+
+function resolveFocusableIndex(focusables, activeElement, fallbackTarget) {
+    if (activeElement instanceof HTMLElement) {
+        const activeIndex = focusables.indexOf(activeElement);
+        if (activeIndex !== -1) {
+            return { index: activeIndex, source: "active" };
+        }
+    }
+
+    if (fallbackTarget) {
+        if (fallbackTarget.id) {
+            const idIndex = focusables.findIndex(element => element.id === fallbackTarget.id);
+            if (idIndex !== -1) {
+                return { index: idIndex, source: "fallback" };
+            }
+        }
+
+        if (fallbackTarget.name) {
+            const nameMatchIndex = focusables.findIndex(element => {
+                if (element.getAttribute("name") !== fallbackTarget.name) {
+                    return false;
+                }
+
+                if (element instanceof HTMLInputElement && element.type === "radio") {
+                    return element.checked;
+                }
+
+                return true;
+            });
+
+            if (nameMatchIndex !== -1) {
+                return { index: nameMatchIndex, source: "fallback" };
+            }
+
+            const anyNameIndex = focusables.findIndex(element => element.getAttribute("name") === fallbackTarget.name);
+            if (anyNameIndex !== -1) {
+                return { index: anyNameIndex, source: "fallback" };
+            }
+        }
+    }
+
+    return { index: -1, source: "none" };
 }
 
 function handleStageTabCycle(event) {
@@ -691,7 +753,17 @@ function handleStageTabCycle(event) {
     const activeElement = document.activeElement;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
+    const resolved = resolveFocusableIndex(focusables, activeElement, lastStageFocusTarget);
     const isActiveInScope = activeElement instanceof HTMLElement && focusables.includes(activeElement);
+
+    if (resolved.index !== -1 && !isActiveInScope) {
+        event.preventDefault();
+        const nextIndex = event.shiftKey
+            ? (resolved.index > 0 ? resolved.index - 1 : focusables.length - 1)
+            : (resolved.index < focusables.length - 1 ? resolved.index + 1 : 0);
+        focusables[nextIndex].focus();
+        return;
+    }
 
     if (event.shiftKey) {
         if (!isActiveInScope || activeElement === first) {
@@ -716,6 +788,50 @@ function focusFirstStageElement() {
     focusables[0].focus();
 }
 
+function getFocusTargetFromElement(element) {
+    if (!(element instanceof HTMLElement)) {
+        return null;
+    }
+
+    return {
+        id: element.id || null,
+        name: element.getAttribute("name") || null,
+        version: focusVersion
+    };
+}
+
+function getActiveFocusTarget() {
+    return getFocusTargetFromElement(document.activeElement);
+}
+
+function restoreFocus(target) {
+    if (!target) {
+        return false;
+    }
+
+    if (target.id) {
+        const byId = document.getElementById(target.id);
+        if (byId && isElementVisible(byId)) {
+            byId.focus();
+            return true;
+        }
+    }
+
+    if (target.name && container) {
+        const byName = container.querySelector(`[name="${CSS.escape(target.name)}"]`);
+        if (byName && isElementVisible(byName)) {
+            byName.focus();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isActiveElementInStageScope() {
+    return isElementInStageScope(document.activeElement) && isElementVisible(document.activeElement);
+}
+
 
 async function handleSubmit() {
     if (isSubmitting) {
@@ -737,7 +853,7 @@ async function handleSubmit() {
     if (Object.keys(errors).length) {
         const firstErrorStage = findFirstErrorStage(formSchema, errors);
         if (firstErrorStage !== null && firstErrorStage !== currentStage) {
-            renderStage(firstErrorStage);
+            renderStage(firstErrorStage, { focusOnChange: true });
         }
         showErrors(errors);
         return;
@@ -785,12 +901,14 @@ async function postPayload(payload) {
     }
 }
 
-function renderStage(stageIndex) {
+function renderStage(stageIndex, options = {}) {
     if (!container) {
         return;
     }
 
     clearSubmitFeedback();
+
+    const { focusOnChange = false, restoreFocusTarget = null } = options;
 
     // Require explicit stage index - fall back to 0 if not provided
     const targetIndex = typeof stageIndex === "number" ? stageIndex : 0;
@@ -803,7 +921,11 @@ function renderStage(stageIndex) {
         showErrors({});
         updateStageIndicator(formSchema, 0);
         updateNavigationControls(formSchema, 0);
-        focusFirstStageElement();
+        if (restoreFocusTarget && restoreFocusTarget.version === focusVersion) {
+            restoreFocus(restoreFocusTarget);
+        } else if (!isActiveElementInStageScope() && lastStageFocusTarget) {
+            restoreFocus(lastStageFocusTarget);
+        }
         return;
     }
 
@@ -826,10 +948,20 @@ function renderStage(stageIndex) {
         updateNavigationControls(formSchema, currentStage);
     }
 
-    focusFirstStageElement();
+    if (previousStage === currentStage) {
+        if (restoreFocusTarget && restoreFocusTarget.version === focusVersion) {
+            restoreFocus(restoreFocusTarget);
+        } else if (!isActiveElementInStageScope() && lastStageFocusTarget) {
+            restoreFocus(lastStageFocusTarget);
+        }
+    }
 
     // Announce stage change to screen readers
     if (previousStage !== currentStage) {
+        lastStageFocusTarget = null;
+        if (focusOnChange) {
+            focusFirstStageElement();
+        }
         const stage = formSchema.stages[currentStage];
         announceToScreenReader(`שלב ${currentStage + 1} מתוך ${getStageCount(formSchema)} - ${stage.label}`);
     }
@@ -917,7 +1049,7 @@ function updateStageIndicator(schema, stageIndex = 0) {
             return;
         }
 
-        renderStage(targetIndex);
+        renderStage(targetIndex, { focusOnChange: true });
     }, { signal });
 }
 
@@ -970,7 +1102,7 @@ if (prevButton) {
         if (!isMultiStage(formSchema)) {
             return;
         }
-        renderStage(Math.max(currentStage - 1, 0));
+        renderStage(Math.max(currentStage - 1, 0), { focusOnChange: true });
     };
 }
 
@@ -984,7 +1116,7 @@ if (nextButton) {
             showErrors(errors);
             return;
         }
-        renderStage(currentStage + 1);
+        renderStage(currentStage + 1, { focusOnChange: true });
     };
 }
 
@@ -1001,6 +1133,15 @@ if (resetButton) {
 }
 
 document.addEventListener("keydown", handleStageTabCycle);
+document.addEventListener("focusin", event => {
+    focusVersion += 1;
+    const target = event.target;
+    if (isElementInStageScope(target)) {
+        lastStageFocusTarget = getFocusTargetFromElement(target);
+    } else {
+        lastStageFocusTarget = null;
+    }
+});
 
 pruneHiddenFields(formSchema, state);
 saveDraft(state);
