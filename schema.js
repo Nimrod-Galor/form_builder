@@ -185,6 +185,12 @@ const stages = [
         placeholder: "שתף דרישות או תזכורות חשובות"
       }
     ]
+  },
+  {
+    id: "summary",
+    label: "סיכום",
+    type: "summary",
+    fields: []
   }
 ];
 

@@ -90,6 +90,132 @@ function buildSubmissionPayload(schema, state) {
     return payload;
 }
 
+function getSummaryStageIndex(schema) {
+    if (!isMultiStage(schema)) {
+        return -1;
+    }
+
+    return schema.stages.findIndex(stage => stage?.type === "summary");
+}
+
+function isSummaryStage(schema, stageIndex) {
+    const summaryIndex = getSummaryStageIndex(schema);
+    return summaryIndex !== -1 && summaryIndex === stageIndex;
+}
+
+function isOptionalSummaryStage(schema) {
+    const summaryIndex = getSummaryStageIndex(schema);
+    if (summaryIndex === -1) {
+        return false;
+    }
+
+    return Boolean(schema.stages[summaryIndex]?.optional);
+}
+
+function getLastDataStageIndex(schema) {
+    if (!isMultiStage(schema)) {
+        return 0;
+    }
+
+    const summaryIndex = getSummaryStageIndex(schema);
+    if (summaryIndex === -1) {
+        return getStageCount(schema) - 1;
+    }
+
+    return Math.max(summaryIndex - 1, 0);
+}
+
+function resolveOptionLabel(field, value) {
+    if (!Array.isArray(field.options)) {
+        return value;
+    }
+
+    const match = field.options.find(option => {
+        const optionValue = typeof option === "string" ? option : option.value;
+        return optionValue === value;
+    });
+
+    if (!match) {
+        return value;
+    }
+
+    return typeof match === "string" ? match : (match.label ?? match.value);
+}
+
+function formatFieldValue(field, value) {
+    const emptyValue = "—";
+
+    if (field.type === "checkbox") {
+        return value ? "כן" : "לא";
+    }
+
+    if (value === undefined || value === null || value === "") {
+        return emptyValue;
+    }
+
+    if (field.type === "select" || field.type === "radio") {
+        const label = resolveOptionLabel(field, value);
+        return label ?? emptyValue;
+    }
+
+    return String(value);
+}
+
+function renderSummaryStage(schema, container, state) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = "";
+
+    const summaryWrapper = document.createElement("div");
+    summaryWrapper.className = "d-flex flex-column gap-3";
+
+    const intro = document.createElement("p");
+    intro.className = "text-muted mb-2";
+    intro.textContent = "בדוק את הנתונים לפני שליחה.";
+    summaryWrapper.appendChild(intro);
+
+    const summaryIndex = getSummaryStageIndex(schema);
+    schema.stages.forEach((stage, index) => {
+        if (index === summaryIndex || stage?.type === "summary") {
+            return;
+        }
+
+        const visibleFields = getVisibleFields(schema, state, index);
+        if (!visibleFields.length) {
+            return;
+        }
+
+        const section = document.createElement("div");
+        section.className = "border rounded-3 p-3 bg-white";
+
+        const title = document.createElement("h4");
+        title.className = "h6 mb-3";
+        title.textContent = stage.label ?? `שלב ${index + 1}`;
+
+        const list = document.createElement("dl");
+        list.className = "row mb-0";
+
+        visibleFields.forEach(field => {
+            const term = document.createElement("dt");
+            term.className = "col-5 col-sm-4 text-muted";
+            term.textContent = field.label ?? field.name;
+
+            const detail = document.createElement("dd");
+            detail.className = "col-7 col-sm-8 mb-2";
+            detail.textContent = formatFieldValue(field, state[field.name]);
+
+            list.append(term, detail);
+        });
+
+        section.append(title, list);
+        summaryWrapper.appendChild(section);
+    });
+
+    container.appendChild(summaryWrapper);
+}
+
 function handleFieldChange(schema, state, stageIndex, fieldName, value) {
     clearPendingRender(fieldName);
     state[fieldName] = value;
@@ -505,10 +631,20 @@ function renderStage(stageIndex) {
     const previousStage = currentStage;
     currentStage = Math.min(Math.max(targetIndex, 0), lastIndex);
     furthestStageReached = Math.max(furthestStageReached, currentStage);
-    renderForm(formSchema, container, state, currentStage);
-    showErrors({});
-    updateStageIndicator(formSchema, currentStage);
-    updateNavigationControls(formSchema, currentStage);
+    if (isOptionalSummaryStage(formSchema) && currentStage === getLastDataStageIndex(formSchema)) {
+        furthestStageReached = Math.max(furthestStageReached, Math.min(currentStage + 1, lastIndex));
+    }
+    if (isSummaryStage(formSchema, currentStage)) {
+        renderSummaryStage(formSchema, container, state);
+        showErrors({});
+        updateStageIndicator(formSchema, currentStage);
+        updateNavigationControls(formSchema, currentStage);
+    } else {
+        renderForm(formSchema, container, state, currentStage);
+        showErrors({});
+        updateStageIndicator(formSchema, currentStage);
+        updateNavigationControls(formSchema, currentStage);
+    }
 
     // Announce stage change to screen readers
     if (previousStage !== currentStage) {
@@ -614,7 +750,26 @@ function updateNavigationControls(schema, stageIndex = 0) {
         return;
     }
 
+    const summaryIndex = getSummaryStageIndex(schema);
+    const hasSummary = summaryIndex !== -1;
+    const isSummary = hasSummary && stageIndex === summaryIndex;
+    const lastStageIndex = getStageCount(schema) - 1;
+    const lastDataStageIndex = getLastDataStageIndex(schema);
+
     prevButton.style.display = stageIndex === 0 ? "none" : "inline-block";
-    nextButton.style.display = stageIndex >= getStageCount(schema) - 1 ? "none" : "inline-block";
-    submitButton.style.display = stageIndex === getStageCount(schema) - 1 ? "inline-block" : "none";
+
+    if (isSummary) {
+        nextButton.style.display = "none";
+        submitButton.style.display = "inline-block";
+        return;
+    }
+
+    if (hasSummary && stageIndex === lastDataStageIndex) {
+        nextButton.style.display = "inline-block";
+        submitButton.style.display = isOptionalSummaryStage(schema) ? "inline-block" : "none";
+        return;
+    }
+
+    nextButton.style.display = stageIndex >= lastStageIndex ? "none" : "inline-block";
+    submitButton.style.display = stageIndex === lastStageIndex ? "inline-block" : "none";
 }
