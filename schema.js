@@ -37,6 +37,12 @@ const stages = [
         rows: 3,
         placeholder: "הוסף פרטים או נסיבות מיוחדות",
         helperText: "אופציונלי — למשל פרויקטים בולטים או מגבלות"
+      },
+      {
+        name: "employmentInfoNote",
+        type: "plain text",
+        title: "שים לב",
+        text: "מידע זה לא נשמר בטופס ומשמש כהסבר בלבד."
       }
     ]
   },

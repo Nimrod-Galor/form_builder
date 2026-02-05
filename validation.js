@@ -42,7 +42,9 @@ export function shouldDisplayField(field, state) {
 }
 
 export function getVisibleFields(schema, state, stageIndex = null) {
-    return getFields(schema, stageIndex).filter(field => shouldDisplayField(field, state));
+    return getFields(schema, stageIndex)
+        .filter(field => !isPlainTextField(field))
+        .filter(field => shouldDisplayField(field, state));
 }
 
 export function validateStage(schema, state, stageIndex = null) {
@@ -82,6 +84,11 @@ function buildFieldSchema(field) {
     }
 
     return buildTextSchema(field);
+}
+
+function isPlainTextField(field) {
+    const type = String(field?.type ?? "").toLowerCase();
+    return type === "plain text" || type === "plaintext";
 }
 
 function buildTextSchema(field) {

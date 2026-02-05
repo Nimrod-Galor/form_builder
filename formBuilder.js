@@ -16,6 +16,28 @@ let furthestStageReached = 0;
 const renderDebounceMs = 200;
 const pendingRenderTimers = new Map();
 
+const container = document.getElementById("form");
+const stageIndicator = document.getElementById("stage-indicator");
+const prevButton = document.getElementById("prev");
+const nextButton = document.getElementById("next");
+const submitButton = document.getElementById("submit");
+const resetButton = document.getElementById("reset");
+const state = loadDraft();
+
+// Create live region for screen reader announcements
+const liveRegion = document.createElement("div");
+liveRegion.id = "form-live-region";
+liveRegion.setAttribute("aria-live", "polite");
+liveRegion.setAttribute("aria-atomic", "true");
+liveRegion.className = "visually-hidden";
+document.body.appendChild(liveRegion);
+
+function isPlainTextField(field) {
+    const type = String(field?.type ?? "").toLowerCase();
+    return type === "plain text" || type === "plaintext";
+}
+
+
 function getControllerFields(schema) {
     const fields = getFields(schema);
     return new Set(
@@ -277,6 +299,30 @@ function renderForm(schema, container, state, stageIndex = null) {
             return;
         }
 
+        if (isPlainTextField(field)) {
+            const infoBlock = document.createElement("div");
+            infoBlock.className = "mb-3";
+
+            const titleText = field.title ?? field.label;
+            if (titleText) {
+                const title = document.createElement("h4");
+                title.className = "h6 mb-2";
+                title.textContent = titleText;
+                infoBlock.appendChild(title);
+            }
+
+            const bodyText = field.text ?? field.content ?? field.description ?? "";
+            if (bodyText) {
+                const paragraph = document.createElement("p");
+                paragraph.className = "mb-0 text-muted";
+                paragraph.textContent = String(bodyText);
+                infoBlock.appendChild(paragraph);
+            }
+
+            container.appendChild(infoBlock);
+            return;
+        }
+
         const wrapper = document.createElement("div");
         wrapper.className = "mb-3";
         wrapper.dataset.fieldWrapper = field.name;
@@ -512,21 +558,7 @@ function resetForm(stateRef) {
     announceToScreenReader("הטופס אופס");
 }
 
-const container = document.getElementById("form");
-const stageIndicator = document.getElementById("stage-indicator");
-const prevButton = document.getElementById("prev");
-const nextButton = document.getElementById("next");
-const submitButton = document.getElementById("submit");
-const resetButton = document.getElementById("reset");
-const state = loadDraft();
 
-// Create live region for screen reader announcements
-const liveRegion = document.createElement("div");
-liveRegion.id = "form-live-region";
-liveRegion.setAttribute("aria-live", "polite");
-liveRegion.setAttribute("aria-atomic", "true");
-liveRegion.className = "visually-hidden";
-document.body.appendChild(liveRegion);
 
 function announceToScreenReader(message) {
     liveRegion.textContent = "";
@@ -536,52 +568,6 @@ function announceToScreenReader(message) {
     }, 100);
 }
 
-pruneHiddenFields(formSchema, state);
-saveDraft(state);
-
-renderStage(0);
-
-if (container) {
-    container.addEventListener("submit", event => {
-        event.preventDefault();
-        handleSubmit();
-    });
-}
-
-if (prevButton) {
-    prevButton.onclick = () => {
-        if (!isMultiStage(formSchema)) {
-            return;
-        }
-        renderStage(Math.max(currentStage - 1, 0));
-    };
-}
-
-if (nextButton) {
-    nextButton.onclick = () => {
-        if (!isMultiStage(formSchema)) {
-            return;
-        }
-        const errors = validateStage(formSchema, state, currentStage);
-        if (Object.keys(errors).length) {
-            showErrors(errors);
-            return;
-        }
-        renderStage(currentStage + 1);
-    };
-}
-
-if (submitButton) {
-    submitButton.onclick = handleSubmit;
-}
-
-if (resetButton) {
-    resetButton.onclick = () => {
-        if (confirm("האם אתה בטוח שברצונך לאפס את הטופס?")) {
-            resetForm(state);
-        }
-    };
-}
 
 function handleSubmit() {
     if (isMultiStage(formSchema)) {
@@ -773,3 +759,51 @@ function updateNavigationControls(schema, stageIndex = 0) {
     nextButton.style.display = stageIndex >= lastStageIndex ? "none" : "inline-block";
     submitButton.style.display = stageIndex === lastStageIndex ? "inline-block" : "none";
 }
+
+
+if (container) {
+    container.addEventListener("submit", event => {
+        event.preventDefault();
+        handleSubmit();
+    });
+}
+
+if (prevButton) {
+    prevButton.onclick = () => {
+        if (!isMultiStage(formSchema)) {
+            return;
+        }
+        renderStage(Math.max(currentStage - 1, 0));
+    };
+}
+
+if (nextButton) {
+    nextButton.onclick = () => {
+        if (!isMultiStage(formSchema)) {
+            return;
+        }
+        const errors = validateStage(formSchema, state, currentStage);
+        if (Object.keys(errors).length) {
+            showErrors(errors);
+            return;
+        }
+        renderStage(currentStage + 1);
+    };
+}
+
+if (submitButton) {
+    submitButton.onclick = handleSubmit;
+}
+
+if (resetButton) {
+    resetButton.onclick = () => {
+        if (confirm("האם אתה בטוח שברצונך לאפס את הטופס?")) {
+            resetForm(state);
+        }
+    };
+}
+
+pruneHiddenFields(formSchema, state);
+saveDraft(state);
+
+renderStage(0);

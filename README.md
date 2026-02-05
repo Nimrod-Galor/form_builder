@@ -11,6 +11,7 @@ A schema-driven, multi-stage form builder that renders fields dynamically, valid
 - Validation with inline errors
 - Draft persistence in localStorage
 - Accessible labels and helper text
+- Plain text informational blocks (no state/validation)
 
 ## Project Structure
 
