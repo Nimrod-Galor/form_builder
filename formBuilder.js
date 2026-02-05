@@ -1,4 +1,5 @@
-import { formSchema } from "./schema.js";
+// import { formSchema } from "./schema.js";
+import { formSchema } from "./schema.capabilities.js";
 import {
     REQUIRED_MESSAGE,
     getFields,
