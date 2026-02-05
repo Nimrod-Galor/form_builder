@@ -627,6 +627,7 @@ function resetForm(stateRef) {
     // Clear all properties from state object
     Object.keys(stateRef).forEach(key => delete stateRef[key]);
     clearDraft();
+    clearSubmitFeedback();
     currentStage = 0;
     furthestStageReached = 0;
     renderStage(0);
@@ -788,6 +789,8 @@ function renderStage(stageIndex) {
     if (!container) {
         return;
     }
+
+    clearSubmitFeedback();
 
     // Require explicit stage index - fall back to 0 if not provided
     const targetIndex = typeof stageIndex === "number" ? stageIndex : 0;
