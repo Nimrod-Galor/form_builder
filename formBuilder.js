@@ -23,7 +23,10 @@ const prevButton = document.getElementById("prev");
 const nextButton = document.getElementById("next");
 const submitButton = document.getElementById("submit");
 const resetButton = document.getElementById("reset");
+const controls = document.getElementById("controls");
 const state = loadDraft(formSchema);
+let isSubmitting = false;
+let submitFeedback = null;
 
 // Create live region for screen reader announcements
 const liveRegion = document.createElement("div");
@@ -32,6 +35,63 @@ liveRegion.setAttribute("aria-live", "polite");
 liveRegion.setAttribute("aria-atomic", "true");
 liveRegion.className = "visually-hidden";
 document.body.appendChild(liveRegion);
+
+function ensureSubmitFeedback() {
+    if (submitFeedback) {
+        return submitFeedback;
+    }
+
+    if (!container) {
+        return null;
+    }
+
+    submitFeedback = document.createElement("div");
+    submitFeedback.id = "submit-feedback";
+    submitFeedback.className = "alert d-none mt-3";
+    submitFeedback.setAttribute("role", "status");
+    submitFeedback.setAttribute("aria-live", "polite");
+
+    if (controls?.parentElement) {
+        controls.parentElement.insertBefore(submitFeedback, controls);
+    } else {
+        container.after(submitFeedback);
+    }
+
+    return submitFeedback;
+}
+
+function setSubmitFeedback(type, message) {
+    const feedback = ensureSubmitFeedback();
+    if (!feedback) {
+        return;
+    }
+
+    feedback.className = `alert alert-${type} mt-3`;
+    feedback.textContent = message;
+    feedback.classList.remove("d-none");
+}
+
+function clearSubmitFeedback() {
+    if (!submitFeedback) {
+        return;
+    }
+
+    submitFeedback.textContent = "";
+    submitFeedback.className = "alert d-none mt-3";
+}
+
+function setSubmittingState(nextIsSubmitting) {
+    isSubmitting = nextIsSubmitting;
+    [prevButton, nextButton, submitButton, resetButton].forEach(button => {
+        if (button) {
+            button.disabled = nextIsSubmitting;
+        }
+    });
+
+    if (submitButton) {
+        submitButton.setAttribute("aria-busy", nextIsSubmitting ? "true" : "false");
+    }
+}
 
 function isPlainTextField(field) {
     const type = String(field?.type ?? "").toLowerCase();
@@ -584,7 +644,13 @@ function announceToScreenReader(message) {
 }
 
 
-function handleSubmit() {
+async function handleSubmit() {
+    if (isSubmitting) {
+        return;
+    }
+
+    clearSubmitFeedback();
+
     if (isMultiStage(formSchema)) {
         const stageErrors = validateStage(formSchema, state, currentStage);
         if (Object.keys(stageErrors).length) {
@@ -607,6 +673,43 @@ function handleSubmit() {
     const payload = buildSubmissionPayload(formSchema, state);
     console.log("submit payload:", payload);
     console.log("submit payload JSON:", JSON.stringify(payload));
+
+    postPayload(payload);
+}
+
+async function postPayload(payload) {
+
+    const formAction = container?.getAttribute("action");
+    if (!formAction) {
+        console.warn("Form action is missing; payload was not submitted.");
+        setSubmitFeedback("danger", "לא ניתן לשלוח: חסר יעד שליחה בטופס.");
+        return;
+    }
+
+    const formMethod = (container?.getAttribute("method") || "post").toUpperCase();
+    setSubmittingState(true);
+    try {
+        const response = await fetch(formAction, {
+            method: formMethod,
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            console.warn("Form submit failed:", response.status, response.statusText);
+            setSubmitFeedback("danger", `השליחה נכשלה (${response.status}). נסה שוב.`);
+            return;
+        }
+
+        setSubmitFeedback("success", "הטופס נשלח בהצלחה.");
+    } catch (error) {
+        console.error("Form submit error:", error);
+        setSubmitFeedback("danger", "אירעה שגיאה בשליחה. נסה שוב.");
+    } finally {
+        setSubmittingState(false);
+    }
 }
 
 function renderStage(stageIndex) {
