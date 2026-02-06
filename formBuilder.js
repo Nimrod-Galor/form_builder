@@ -4,6 +4,7 @@ import {
     getStageCount,
     getVisibleFields,
     isMultiStage,
+    isPlainTextField,
     shouldDisplayField,
     validateStage
 } from "./validation.js";
@@ -57,14 +58,19 @@ async function loadSchemaFromDom() {
         return null;
     }
 
-    const moduleUrl = new URL(schemaSrc, import.meta.url).href;
-    const schemaModule = await import(moduleUrl);
-    if (!schemaModule?.formSchema) {
-        console.error("Schema module did not export formSchema:", schemaSrc);
+    try {
+        const moduleUrl = new URL(schemaSrc, import.meta.url).href;
+        const schemaModule = await import(moduleUrl);
+        if (!schemaModule?.formSchema) {
+            console.error("Schema module did not export formSchema:", schemaSrc);
+            return null;
+        }
+
+        return schemaModule.formSchema;
+    } catch (error) {
+        console.error("Failed to load schema module:", schemaSrc, error);
         return null;
     }
-
-    return schemaModule.formSchema;
 }
 
 function ensureSubmitFeedback() {
@@ -123,12 +129,6 @@ function setSubmittingState(nextIsSubmitting) {
         submitButton.setAttribute("aria-busy", nextIsSubmitting ? "true" : "false");
     }
 }
-
-function isPlainTextField(field) {
-    const type = String(field?.type ?? "").toLowerCase();
-    return type === "plain text" || type === "plaintext";
-}
-
 
 function getControllerFields(schema) {
     const fields = getFields(schema);
@@ -260,6 +260,9 @@ function formatFieldValue(field, value) {
     const emptyValue = "—";
 
     if (field.type === "checkbox") {
+        if (value === undefined || value === null || value === "") {
+            return emptyValue;
+        }
         return value ? "כן" : "לא";
     }
 
@@ -646,15 +649,27 @@ function getDraftStorageKey(schema) {
 }
 
 function saveDraft(state, schema = activeSchema) {
-    localStorage.setItem(getDraftStorageKey(schema), JSON.stringify(state));
+    try {
+        localStorage.setItem(getDraftStorageKey(schema), JSON.stringify(state));
+    } catch {
+        // Fail silently if storage is unavailable.
+    }
 }
 
 function loadDraft(schema = activeSchema) {
-    return JSON.parse(localStorage.getItem(getDraftStorageKey(schema)) || "{}");
+    try {
+        return JSON.parse(localStorage.getItem(getDraftStorageKey(schema)) || "{}");
+    } catch {
+        return {};
+    }
 }
 
 function clearDraft(schema = activeSchema) {
-    localStorage.removeItem(getDraftStorageKey(schema));
+    try {
+        localStorage.removeItem(getDraftStorageKey(schema));
+    } catch {
+        // Fail silently if storage is unavailable.
+    }
 }
 
 function resetForm(stateRef) {
@@ -771,6 +786,10 @@ function resolveFocusableIndex(focusables, activeElement, fallbackTarget) {
 
 function handleStageTabCycle(event) {
     if (event.key !== "Tab") {
+        return;
+    }
+
+    if (!isActiveElementInStageScope()) {
         return;
     }
 
@@ -896,7 +915,7 @@ async function handleSubmit() {
     console.log("submit payload:", payload);
     console.log("submit payload JSON:", JSON.stringify(payload));
 
-    postPayload(payload);
+    await postPayload(payload);
 }
 
 async function postPayload(payload) {
@@ -971,15 +990,12 @@ function renderStage(stageIndex, options = {}) {
     }
     if (isSummaryStage(activeSchema, currentStage)) {
         renderSummaryStage(activeSchema, container, state);
-        showErrors({});
-        updateStageIndicator(activeSchema, currentStage);
-        updateNavigationControls(activeSchema, currentStage);
     } else {
         renderForm(activeSchema, container, state, currentStage);
-        showErrors({});
-        updateStageIndicator(activeSchema, currentStage);
-        updateNavigationControls(activeSchema, currentStage);
     }
+    showErrors({});
+    updateStageIndicator(activeSchema, currentStage);
+    updateNavigationControls(activeSchema, currentStage);
 
     if (previousStage === currentStage) {
         if (restoreFocusTarget && restoreFocusTarget.version === focusVersion) {

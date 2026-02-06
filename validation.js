@@ -86,7 +86,7 @@ function buildFieldSchema(field) {
     return buildTextSchema(field);
 }
 
-function isPlainTextField(field) {
+export function isPlainTextField(field) {
     const type = String(field?.type ?? "").toLowerCase();
     return type === "plain text" || type === "plaintext";
 }
