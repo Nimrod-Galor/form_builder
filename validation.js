@@ -101,8 +101,7 @@ function buildTextSchema(field) {
 
     if (field.required) {
         const requiredMessage = getFieldMessage(field, "required", REQUIRED_MESSAGE);
-        schema = schema.min(1, requiredMessage);
-        // schema = schema.refine(value => !isEmpty(value), { message: requiredMessage });
+        schema = schema.min(1, requiredMessage).refine(value => !isEmpty(value), { message: requiredMessage });
     }
 
     if (field.type === "email") {
@@ -153,8 +152,7 @@ function buildNumberSchema(field) {
 
     if (field.required) {
         const requiredMessage = getFieldMessage(field, "required", REQUIRED_MESSAGE);
-        schema = schema.min(1, requiredMessage);
-        // schema = schema.refine(value => !isEmpty(value), { message: requiredMessage });
+        schema = schema.min(1, requiredMessage).refine(value => !isEmpty(value), { message: requiredMessage });
     }
 
     schema = schema.refine(value => {

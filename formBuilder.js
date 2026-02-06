@@ -9,13 +9,25 @@ import {
     validateStage
 } from "./validation.js";
 
+// Configuration constants
+const RENDER_DEBOUNCE_MS = 200; // Delay for debounced re-renders during text input
+const INPUT_EVENT_TYPES = new Set(["text", "textarea", "email", "tel", "number", "date", "search", "url", "password"]);
+
+// State management
 let currentStage = 0;
 let formAbortController = null;
 let stageIndicatorAbortController = null;
 let furthestStageReached = 0;
+
+/**
+ * Focus version increments on every focusin event to track focus changes.
+ * This prevents restoring focus to stale targets after multiple rapid re-renders.
+ * When a render captures a focus target, it saves the current focusVersion.
+ * If the version has changed by the time restoration happens, the target is considered stale.
+ */
 let focusVersion = 0;
 let lastStageFocusTarget = null;
-const renderDebounceMs = 200;
+
 const pendingRenderTimers = new Map();
 
 const container = document.getElementById("form");
@@ -29,6 +41,7 @@ let activeSchema = null;
 let state = {};
 let isSubmitting = false;
 let submitFeedback = null;
+let isLoadingSchema = false;
 
 // Create live region for screen reader announcements
 const liveRegion = document.createElement("div");
@@ -52,24 +65,54 @@ function getSchemaSource() {
     return schemaSrc;
 }
 
+function displaySchemaError(message) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = "";
+    const errorDiv = document.createElement("div");
+    errorDiv.className = "alert alert-danger";
+    errorDiv.setAttribute("role", "alert");
+    errorDiv.innerHTML = `
+        <h4 class="alert-heading">שגיאה בטעינת הטופס</h4>
+        <p>${message}</p>
+    `;
+    container.appendChild(errorDiv);
+
+    if (controls) {
+        controls.style.display = "none";
+    }
+}
+
 async function loadSchemaFromDom() {
+    if (isLoadingSchema) {
+        console.warn("Schema is already loading, skipping concurrent load attempt");
+        return null;
+    }
+
     const schemaSrc = getSchemaSource();
     if (!schemaSrc) {
         return null;
     }
 
+    isLoadingSchema = true;
     try {
         const moduleUrl = new URL(schemaSrc, import.meta.url).href;
         const schemaModule = await import(moduleUrl);
         if (!schemaModule?.formSchema) {
             console.error("Schema module did not export formSchema:", schemaSrc);
+            displaySchemaError("Schema file does not export 'formSchema'. Please check the schema file.");
             return null;
         }
 
         return schemaModule.formSchema;
     } catch (error) {
         console.error("Failed to load schema module:", schemaSrc, error);
+        displaySchemaError("Failed to load form schema. Please refresh the page and try again.");
         return null;
+    } finally {
+        isLoadingSchema = false;
     }
 }
 
@@ -333,6 +376,15 @@ function renderSummaryStage(schema, container, state) {
     container.appendChild(summaryWrapper);
 }
 
+/**
+ * Handles field change events (e.g., blur, select change, checkbox change).
+ * Updates state, prunes hidden fields, saves draft, and re-renders immediately.
+ * @param {Object} schema - The form schema
+ * @param {Object} state - The form state
+ * @param {number|null} stageIndex - The current stage index
+ * @param {string} fieldName - The field name that changed
+ * @param {*} value - The new field value
+ */
 function handleFieldChange(schema, state, stageIndex, fieldName, value) {
     clearPendingRender(fieldName);
     const focusTarget = getActiveFocusTarget();
@@ -347,6 +399,15 @@ function handleFieldChange(schema, state, stageIndex, fieldName, value) {
     renderStage(undefined, { restoreFocusTarget: focusTarget });
 }
 
+/**
+ * Handles field input events (e.g., typing in text inputs).
+ * Updates state and schedules a debounced re-render to avoid excessive rendering.
+ * @param {Object} schema - The form schema
+ * @param {Object} state - The form state
+ * @param {number|null} stageIndex - The current stage index
+ * @param {string} fieldName - The field name being edited
+ * @param {*} value - The new field value
+ */
 function handleFieldInput(schema, state, stageIndex, fieldName, value) {
     const focusTarget = getActiveFocusTarget();
     state[fieldName] = value;
@@ -373,7 +434,7 @@ function scheduleRender(stageIndex, fieldName, focusTarget = null) {
             return;
         }
         renderStage(undefined, { restoreFocusTarget: focusTarget });
-    }, renderDebounceMs);
+    }, RENDER_DEBOUNCE_MS);
     pendingRenderTimers.set(fieldName, timerId);
 }
 
@@ -381,6 +442,7 @@ function renderForm(schema, container, state, stageIndex = null) {
     // Abort previous event listeners before re-rendering
     if (formAbortController) {
         formAbortController.abort();
+        formAbortController = null;
     }
     formAbortController = new AbortController();
     const { signal } = formAbortController;
@@ -389,7 +451,6 @@ function renderForm(schema, container, state, stageIndex = null) {
 
     const fields = getFields(schema, stageIndex);
     const controllerFields = getControllerFields(schema);
-    const inputEventTypes = new Set(["text", "textarea", "email", "tel", "number", "date", "search", "url", "password"]);
 
     fields.forEach(field => {
         if (!shouldDisplayField(field, state)) {
@@ -552,7 +613,7 @@ function renderForm(schema, container, state, stageIndex = null) {
         input.setAttribute("aria-invalid", "false");
         applyInputAttributes(input, field);
 
-        if (controllerFields.has(field.name) && inputEventTypes.has(field.type)) {
+        if (controllerFields.has(field.name) && INPUT_EVENT_TYPES.has(field.type)) {
             input.addEventListener("input", e => {
                 handleFieldInput(schema, state, stageIndex, field.name, e.target.value);
             }, { signal });
@@ -680,7 +741,7 @@ function resetForm(stateRef) {
     currentStage = 0;
     furthestStageReached = 0;
     renderStage(0, { focusOnChange: true });
-    announceToScreenReader("הטופס אופס");
+    announceToScreenReader("הטופס אופסן");
 }
 
 
@@ -836,6 +897,12 @@ function focusFirstStageElement() {
     focusables[0].focus();
 }
 
+/**
+ * Creates a focus target object from an HTML element.
+ * The focus version is used to track focus changes and prevent stale focus restoration.
+ * @param {HTMLElement} element - The element to create a target from
+ * @returns {Object|null} Focus target with id, name, and version
+ */
 function getFocusTargetFromElement(element) {
     if (!(element instanceof HTMLElement)) {
         return null;
@@ -848,10 +915,20 @@ function getFocusTargetFromElement(element) {
     };
 }
 
+/**
+ * Gets the focus target for the currently active element.
+ * @returns {Object|null} Focus target for document.activeElement
+ */
 function getActiveFocusTarget() {
     return getFocusTargetFromElement(document.activeElement);
 }
 
+/**
+ * Attempts to restore focus to a previously focused element.
+ * Tries to match by ID first, then by name attribute.
+ * @param {Object} target - Focus target object with id and name
+ * @returns {boolean} True if focus was successfully restored
+ */
 function restoreFocus(target) {
     if (!target) {
         return false;
@@ -912,8 +989,6 @@ async function handleSubmit() {
     }
 
     const payload = buildSubmissionPayload(activeSchema, state);
-    console.log("submit payload:", payload);
-    console.log("submit payload JSON:", JSON.stringify(payload));
 
     await postPayload(payload);
 }
@@ -924,7 +999,7 @@ async function postPayload(payload) {
     if (!formAction) {
         console.warn("Form action is missing; payload was not submitted.");
         setSubmitFeedback("danger", "לא ניתן לשלוח: חסר יעד שליחה בטופס.");
-        return;
+        return false;
     }
 
     const formMethod = (container?.getAttribute("method") || "post").toUpperCase();
@@ -941,13 +1016,16 @@ async function postPayload(payload) {
         if (!response.ok) {
             console.warn("Form submit failed:", response.status, response.statusText);
             setSubmitFeedback("danger", `השליחה נכשלה (${response.status}). נסה שוב.`);
-            return;
+            return false;
         }
 
         setSubmitFeedback("success", "הטופס נשלח בהצלחה.");
+        clearDraft();
+        return true;
     } catch (error) {
         console.error("Form submit error:", error);
         setSubmitFeedback("danger", "אירעה שגיאה בשליחה. נסה שוב.");
+        return false;
     } finally {
         setSubmittingState(false);
     }
@@ -1079,6 +1157,7 @@ function updateStageIndicator(schema, stageIndex = 0) {
 
     if (stageIndicatorAbortController) {
         stageIndicatorAbortController.abort();
+        stageIndicatorAbortController = null;
     }
     stageIndicatorAbortController = new AbortController();
     const { signal } = stageIndicatorAbortController;
