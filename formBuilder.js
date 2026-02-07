@@ -156,14 +156,15 @@ export class FormBuilder {
         this.root = root;
         this.instanceId = root.dataset.formBuilder || root.id || `fb-${nextInstanceId++}`;
 
-        // Find DOM elements within root
+        // Find form element and create UI chrome dynamically
         this.container = root.querySelector("form");
-        this.stageIndicator = root.querySelector("[data-fb-role='stage-indicator']");
-        this.controls = root.querySelector("[data-fb-role='controls']");
-        this.prevButton = root.querySelector("[data-fb-role='prev']");
-        this.nextButton = root.querySelector("[data-fb-role='next']");
-        this.submitButton = root.querySelector("[data-fb-role='submit']");
-        this.resetButton = root.querySelector("[data-fb-role='reset']");
+        this.stageIndicator = this._createStageIndicator();
+        const { controls, prevButton, nextButton, submitButton, resetButton } = this._createControls();
+        this.controls = controls;
+        this.prevButton = prevButton;
+        this.nextButton = nextButton;
+        this.submitButton = submitButton;
+        this.resetButton = resetButton;
 
         // Instance state
         this.currentStage = 0;
@@ -1274,6 +1275,54 @@ export class FormBuilder {
         setTimeout(() => {
             this.liveRegion.textContent = message;
         }, 100);
+    }
+
+    // --- Dynamic UI creation ---
+
+    _createStageIndicator() {
+        if (!this.container) {
+            return null;
+        }
+
+        const indicator = document.createElement("div");
+        indicator.className = "stage-indicator d-none";
+        indicator.setAttribute("role", "status");
+        this.container.before(indicator);
+        return indicator;
+    }
+
+    _createControls() {
+        if (!this.container) {
+            return { controls: null, prevButton: null, nextButton: null, submitButton: null, resetButton: null };
+        }
+
+        const controls = document.createElement("div");
+        controls.className = "d-flex flex-column flex-sm-row gap-2 mt-4";
+
+        const prevButton = document.createElement("button");
+        prevButton.type = "button";
+        prevButton.className = "btn btn-outline-secondary flex-fill";
+        prevButton.textContent = "חזרה";
+
+        const nextButton = document.createElement("button");
+        nextButton.type = "button";
+        nextButton.className = "btn btn-primary flex-fill";
+        nextButton.textContent = "המשך";
+
+        const submitButton = document.createElement("button");
+        submitButton.type = "button";
+        submitButton.className = "btn btn-success flex-fill";
+        submitButton.textContent = "שליחה";
+
+        const resetButton = document.createElement("button");
+        resetButton.type = "button";
+        resetButton.className = "btn btn-outline-danger flex-fill";
+        resetButton.textContent = "איפוס";
+
+        controls.append(prevButton, nextButton, submitButton, resetButton);
+        this.container.after(controls);
+
+        return { controls, prevButton, nextButton, submitButton, resetButton };
     }
 
     // --- Event binding ---
