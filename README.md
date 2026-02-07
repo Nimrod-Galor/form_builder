@@ -57,6 +57,10 @@ export const formSchema = {
 };
 ```
 
+## Schema Editor
+
+Form schemas can be created and edited visually using the [Form Builder Schema Editor](https://github.com/Nimrod-Galor/form_builder_schema_editor). The editor provides a graphical interface for building and modifying schemas without writing JSON by hand.
+
 ## Notes
 
 - Form values are stored in localStorage under `formDraft` or `formDraft:{schemaId}` when `id` is provided in the schema.
