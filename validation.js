@@ -1,51 +1,15 @@
 import { z } from "https://cdn.jsdelivr.net/npm/zod@3.23.8/+esm";
+import { REQUIRED_MESSAGE, getVisibleFields } from "./schemaUtils.js";
 
-// Default fallback messages used when a field does not override copy.
-export const REQUIRED_MESSAGE = "שדה חובה";
+// Re-export everything from schemaUtils for backwards compatibility
+export * from "./schemaUtils.js";
+
 const NUMBER_INVALID_MESSAGE = "ערך מספרי אינו תקין";
 const EMAIL_INVALID_MESSAGE = "כתובת אימייל לא תקינה";
 const PHONE_INVALID_MESSAGE = "מספר טלפון לא תקין";
 const OPTION_INVALID_MESSAGE = "בחירה אינה תקפה";
 const ACCEPTANCE_REQUIRED_MESSAGE = "יש לאשר את הסעיף";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export function isMultiStage(schema) {
-    return Array.isArray(schema.stages) && schema.stages.length > 0;
-}
-
-export function getStageCount(schema) {
-    return isMultiStage(schema) ? schema.stages.length : 1;
-}
-
-export function getFields(schema, stageIndex = null) {
-    if (isMultiStage(schema)) {
-        if (typeof stageIndex === "number") {
-            return schema.stages[stageIndex]?.fields ?? [];
-        }
-        return schema.fields ?? schema.stages.flatMap(stage => stage.fields);
-    }
-
-    return schema.fields ?? [];
-}
-
-export function evaluateCondition(condition, state) {
-    const value = state[condition.field];
-    return value === condition.equals;
-}
-
-export function shouldDisplayField(field, state) {
-    if (!field?.showIf) {
-        return true;
-    }
-
-    return evaluateCondition(field.showIf, state);
-}
-
-export function getVisibleFields(schema, state, stageIndex = null) {
-    return getFields(schema, stageIndex)
-        .filter(field => !isPlainTextField(field))
-        .filter(field => shouldDisplayField(field, state));
-}
 
 export function validateStage(schema, state, stageIndex = null) {
     const fields = getVisibleFields(schema, state, stageIndex);
@@ -84,11 +48,6 @@ function buildFieldSchema(field) {
     }
 
     return buildTextSchema(field);
-}
-
-export function isPlainTextField(field) {
-    const type = String(field?.type ?? "").toLowerCase();
-    return type === "plain text" || type === "plaintext";
 }
 
 function buildTextSchema(field) {
